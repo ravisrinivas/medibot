@@ -1,0 +1,26 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+
+# LLM + RAG stack (same as advanced__RAG.ipynb)
+langchain
+langchain-classic
+langchain-community
+langchain-groq
+langchain-qdrant
+langchain-core
+langchain-huggingface
+sentence-transformers
+
+# Vector store + sparse embeddings
+qdrant-client
+fastembed
+
+# Document parsing
+docling
+transformers
+
+# SQL RAG
+pandas
+requests

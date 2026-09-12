@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Env files
+.env
+
+# Data (large, provided separately by the assignment resources zip)
+backend/data/
+
+# Vector store
+backend/qdrant_storage/
+backend/medibot_vector_db/
+
+# Node / frontend
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
+
+# OS/editor
+.DS_Store
+.vscode/
