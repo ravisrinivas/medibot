@@ -136,9 +136,7 @@ specifically).
 4. Log in as `nurse_lee` or `tech_ortiz`, ask the same analytical question
    &mdash; should return `retrieval_type: "blocked"`.
 
-`backend/diagnose.py` can also inspect the Qdrant collection directly and
-test the RBAC filter without going through the API (stop `uvicorn` first,
-since local Qdrant only allows one process at a time).
+
 
 ## Status
 
