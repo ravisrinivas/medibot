@@ -26,10 +26,10 @@ Question + role token
 ```
 
 RBAC is enforced with a single shared Qdrant collection (`medibot_hybrid`).
-Every chunk's payload carries `access_roles`, and every retrieval query
-attaches a Qdrant filter matching the caller's role against that field --
-restricted chunks are never fetched from the vector store, so they can
-never reach the LLM or leak through a prompt.
+Every chunk's payload carries `metadata.access_roles`, and every retrieval
+query attaches a Qdrant filter matching the caller's role against that
+field &mdash; restricted chunks are never fetched from the vector store, so
+they can never reach the LLM or leak through a prompt.
 
 ## Project layout
 
@@ -47,40 +47,72 @@ backend/
   data/mediassist_data/   Assignment source documents + mediassist.db
   requirements.txt
   .env.example
-frontend/                 (to be built: Next.js chat UI)
+  diagnose.py             Standalone script to inspect Qdrant + test the RBAC filter
+frontend/
+  pages/login.js          Sign-in page
+  pages/chat.js           Sidebar (role, accessible collections) + chat UI
+  components/             MessageBubble, SourceChips, RoleBadge
+  lib/api.js              Fetch wrapper around the backend
 ```
 
-## Setup (VS Code, Windows/macOS/Linux)
+## Prerequisites
 
-1. Open this folder in VS Code.
-2. Open a terminal in `backend/` and create a virtual environment:
-   ```
-   cd backend
-   python -m venv .venv
-   .venv\Scripts\activate        # Windows
-   source .venv/bin/activate     # macOS/Linux
-   pip install -r requirements.txt
-   ```
-3. Copy `.env.example` to `.env` and paste in your Groq API key
-   (get one free at https://console.groq.com/keys):
-   ```
-   copy .env.example .env   # Windows
-   cp .env.example .env     # macOS/Linux
-   ```
-4. Run the ingestion pipeline once to build the Qdrant index:
-   ```
-   python -m app.ingestion.ingest
-   ```
-   This parses every PDF/Markdown file under `data/mediassist_data/`,
-   chunks it with Docling's `HybridChunker`, tags each chunk with the full
-   metadata schema (`source_document`, `collection`, `access_roles`,
-   `section_title`, `chunk_type`), and indexes it into a local Qdrant store
-   at `qdrant_storage/`.
-5. Start the API server:
-   ```
-   uvicorn app.main:app --reload
-   ```
-6. Visit http://localhost:8000/docs to try the endpoints interactively.
+- **Python 3.10+** with `pip`
+- **Node.js LTS** (includes `npm`) &mdash; download from https://nodejs.org
+- A free **Groq API key** &mdash; https://console.groq.com/keys
+
+## 1. Backend setup
+
+```powershell
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+Open `.env` and paste in your Groq API key. Confirm `MEDIASSIST_DATA_DIR`
+points to `./data/mediassist_data` (already the default) and that your data
+folder is actually placed there.
+
+### Run ingestion (once, or whenever source documents change)
+
+```powershell
+python -m app.ingestion.ingest
+```
+
+This parses all 12 files across `clinical/`, `nursing/`, `billing/`,
+`equipment/`, `general/` with Docling's `HybridChunker`, tags every chunk
+with the full metadata schema, and builds a local Qdrant index at whatever
+path `QDRANT_PATH` points to in `.env` (default `./qdrant_storage`).
+
+Expect ~277 chunks indexed. On Windows, you may see harmless symlink
+warnings from `huggingface_hub`/`fastembed` &mdash; safe to ignore, or fixed
+by enabling Windows Developer Mode.
+
+### Start the API
+
+```powershell
+uvicorn app.main:app --reload
+```
+
+Runs on `http://localhost:8000`. Visit `/docs` for the interactive schema
+(note: testing auth-protected endpoints through Swagger UI can be finicky
+&mdash; see Troubleshooting below. PowerShell is more reliable for manual
+testing.)
+
+## 2. Frontend setup
+
+```powershell
+cd frontend
+npm install
+copy .env.local.example .env.local
+npm run dev
+```
+
+Open `http://localhost:3000` &mdash; it redirects to `/login`. The backend
+must already be running (CORS is configured to allow `localhost:3000`
+specifically).
 
 ### Demo users
 
@@ -92,41 +124,27 @@ frontend/                 (to be built: Next.js chat UI)
 | tech_ortiz    | tech123     | technician         |
 | admin         | admin123    | admin              |
 
-### Try it
+## 3. Validating RBAC works
 
-```
-curl -X POST http://localhost:8000/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "dr_patel", "password": "doctor123"}'
+1. Log in as `dr_patel`, ask a clinical question (e.g. drug dosage) &mdash;
+   should succeed with sources from `clinical`/`nursing`/`general`.
+2. Log in as `tech_ortiz`, ask the **same** clinical question &mdash; should
+   refuse, with sources (if any) only from `equipment`/`general`.
+3. Log in as `billing_kim` or `admin`, ask an analytical question (e.g.
+   "How many claims are escalated versus resolved?") &mdash; should return
+   `retrieval_type: "sql"` with real numbers.
+4. Log in as `nurse_lee` or `tech_ortiz`, ask the same analytical question
+   &mdash; should return `retrieval_type: "blocked"`.
 
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token from login>" \
-  -d '{"question": "What is the standard dose for Amoxicillin?"}'
-```
+`backend/diagnose.py` can also inspect the Qdrant collection directly and
+test the RBAC filter without going through the API (stop `uvicorn` first,
+since local Qdrant only allows one process at a time).
 
-## Pushing to GitHub
-
-From the project root (this folder, containing `backend/` and `frontend/`):
-
-```
-git init
-git add .
-git commit -m "Initial MediBot backend: RBAC-enforced hybrid RAG + SQL RAG"
-git branch -M main
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
-```
-
-`.env` and the `qdrant_storage/` index are gitignored, so they won't be
-pushed -- anyone cloning the repo needs to add their own `.env` and re-run
-the ingestion step.
-
-## Status / next steps
+## Status
 
 - [x] Ingestion pipeline (Docling + HybridChunker, full metadata schema)
 - [x] RBAC-filtered hybrid retrieval + cross-encoder reranking
 - [x] SQL RAG over `mediassist.db`, gated to billing_executive/admin
 - [x] FastAPI backend (`/login`, `/chat`, `/collections/{role}`, `/health`)
-- [ ] Next.js frontend (login, chat UI, source citations, RBAC refusal messages)
-- [ ] Adversarial-prompt test suite + write-up for the README
+- [x] Next.js frontend (login, chat UI, source citations, RBAC refusal styling)
+- [ ] Adversarial-prompt test suite write-up (see validation steps above as a starting point)
